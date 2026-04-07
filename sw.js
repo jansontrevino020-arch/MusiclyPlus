@@ -2,11 +2,13 @@ const CACHE = "musicly-v1";
 
 self.addEventListener("install", e => {
   e.waitUntil(
-    caches.open(CACHE).then(cache => cache.addAll([
-      "./",
-      "index.html",
-      "manifest.webmanifest"
-    ]))
+    caches.open(CACHE).then(cache =>
+      cache.addAll([
+        "./",
+        "index.html",
+        "manifest.webmanifest"
+      ])
+    )
   );
   self.skipWaiting();
 });
@@ -25,7 +27,8 @@ self.addEventListener("fetch", e => {
 
   e.respondWith(
     caches.match(e.request).then(cached => {
-      return cached || fetch(e.request).then(res => {
+      if (cached) return cached;
+      return fetch(e.request).then(res => {
         const copy = res.clone();
         caches.open(CACHE).then(cache => cache.put(e.request, copy));
         return res;
