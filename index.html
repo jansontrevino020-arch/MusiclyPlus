@@ -1,0 +1,368 @@
+<!-- JSZip for ZIP extraction -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<script>
+/* ============================================================
+   PERMANENT MUSIC VAULT — DRAG & DROP ZIP → SAVED FOREVER
+   ============================================================ */
+
+let albums = []; // starts empty — no demo content
+
+/* ---------- IndexedDB Setup ---------- */
+const DB_NAME = "MusicVaultDB";
+const DB_VERSION = 1;
+let db = null;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (db) return resolve();
+
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+    req.onupgradeneeded = e => {
+      db = e.target.result;
+      if (!db.objectStoreNames.contains("albums")) {
+        db.createObjectStore("albums", { keyPath: "id" });
+      }
+    };
+
+    req.onsuccess = e => {
+      db = e.target.result;
+      resolve();
+    };
+
+    req.onerror = e => reject(e);
+  });
+}
+
+function saveAlbum(album) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("albums", "readwrite");
+    tx.objectStore("albums").put(album);
+    tx.oncomplete = resolve;
+    tx.onerror = reject;
+  });
+}
+
+function loadAllAlbums() {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("albums", "readonly");
+    const req = tx.objectStore("albums").getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = reject;
+  });
+}
+
+/* ---------- UI Element References ---------- */
+const albumsGrid = document.getElementById("albumsGrid");
+const trackList = document.getElementById("trackList");
+const currentAlbumThumb = document.getElementById("currentAlbumThumb");
+const currentAlbumTitle = document.getElementById("currentAlbumTitle");
+const currentAlbumArtist = document.getElementById("currentAlbumArtist");
+
+const miniCover = document.getElementById("miniCover");
+const miniTitle = document.getElementById("miniTitle");
+const miniArtist = document.getElementById("miniArtist");
+const currentTimeEl = document.getElementById("currentTime");
+const durationEl = document.getElementById("duration");
+const seekSlider = document.getElementById("seekSlider");
+
+const audio = document.getElementById("audio");
+const playPauseBtn = document.getElementById("playPauseBtn");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
+
+let currentAlbumIndex = 0;
+let currentTrackIndex = 0;
+let isPlaying = false;
+
+/* ---------- Utility ---------- */
+function formatTime(seconds) {
+  if (isNaN(seconds)) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return m + ":" + (s < 10 ? "0" + s : s);
+}
+
+/* ---------- Rendering ---------- */
+function renderAlbums() {
+  albumsGrid.innerHTML = "";
+
+  albums.forEach((album, index) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "album-card" + (index === currentAlbumIndex ? " active" : "");
+
+    const cover = document.createElement("div");
+    cover.className = "album-cover";
+    cover.style.backgroundImage =
+      album.cover
+        ? `url("${album.cover}")`
+        : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+
+    const meta = document.createElement("div");
+    meta.className = "album-meta";
+
+    const title = document.createElement("div");
+    title.className = "album-title";
+    title.textContent = album.title;
+
+    const artist = document.createElement("div");
+    artist.className = "album-artist";
+    artist.textContent = album.artist;
+
+    meta.appendChild(title);
+    meta.appendChild(artist);
+    card.appendChild(cover);
+    card.appendChild(meta);
+
+    card.addEventListener("click", () => switchAlbum(index));
+
+    albumsGrid.appendChild(card);
+  });
+}
+
+function renderTracks() {
+  const album = albums[currentAlbumIndex];
+  trackList.innerHTML = "";
+
+  album.tracks.forEach((track, index) => {
+    const row = document.createElement("div");
+    row.className = "track-row" + (index === currentTrackIndex ? " active" : "");
+
+    const idx = document.createElement("div");
+    idx.className = "track-index";
+    idx.textContent = index + 1;
+
+    const main = document.createElement("div");
+    main.className = "track-main";
+
+    const title = document.createElement("div");
+    title.className = "track-title";
+    title.textContent = track.title;
+
+    const sub = document.createElement("div");
+    sub.className = "track-sub";
+    sub.textContent = album.artist;
+
+    main.appendChild(title);
+    main.appendChild(sub);
+
+    const dur = document.createElement("div");
+    dur.className = "track-duration";
+    dur.textContent = track.duration || "";
+
+    row.appendChild(idx);
+    row.appendChild(main);
+    row.appendChild(dur);
+
+    row.addEventListener("click", () => switchTrack(index, true));
+
+    trackList.appendChild(row);
+  });
+}
+
+/* ---------- Album / Track Switching ---------- */
+function updateAlbumHeader() {
+  const album = albums[currentAlbumIndex];
+  currentAlbumThumb.style.backgroundImage =
+    album.cover
+      ? `url("${album.cover}")`
+      : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+
+  currentAlbumTitle.textContent = album.title;
+  currentAlbumArtist.textContent = album.artist;
+}
+
+function updateMiniPlayer() {
+  const album = albums[currentAlbumIndex];
+  const track = album.tracks[currentTrackIndex];
+
+  miniCover.style.backgroundImage =
+    album.cover
+      ? `url("${album.cover}")`
+      : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+
+  miniTitle.textContent = track.title;
+  miniArtist.textContent = album.artist;
+}
+
+function switchAlbum(index) {
+  currentAlbumIndex = index;
+  currentTrackIndex = 0;
+  renderAlbums();
+  updateAlbumHeader();
+  renderTracks();
+  switchTrack(0, false);
+}
+
+function switchTrack(index, autoPlay) {
+  currentTrackIndex = index;
+  const album = albums[currentAlbumIndex];
+  const track = album.tracks[currentTrackIndex];
+
+  audio.src = track.src;
+  audio.currentTime = 0;
+  seekSlider.value = 0;
+
+  updateMiniPlayer();
+  renderTracks();
+
+  if (autoPlay) play();
+}
+
+/* ---------- Player Controls ---------- */
+function play() {
+  audio.play().then(() => {
+    isPlaying = true;
+    playPauseBtn.textContent = "⏸";
+  });
+}
+
+function pause() {
+  audio.pause();
+  isPlaying = false;
+  playPauseBtn.textContent = "▶";
+}
+
+function togglePlayPause() {
+  if (!audio.src && albums.length > 0) {
+    switchAlbum(0);
+    switchTrack(0, true);
+    return;
+  }
+  isPlaying ? pause() : play();
+}
+
+function playNext() {
+  const album = albums[currentAlbumIndex];
+  if (currentTrackIndex < album.tracks.length - 1) {
+    switchTrack(currentTrackIndex + 1, true);
+  }
+}
+
+function playPrev() {
+  if (audio.currentTime > 3) {
+    audio.currentTime = 0;
+    return;
+  }
+  if (currentTrackIndex > 0) {
+    switchTrack(currentTrackIndex - 1, true);
+  }
+}
+
+/* ---------- ZIP Import → Permanent Save ---------- */
+async function handleZipFile(file) {
+  await openDB();
+
+  const zip = await JSZip.loadAsync(file);
+  const albumMap = {};
+
+  for (const path in zip.files) {
+    const entry = zip.files[path];
+    if (entry.dir) continue;
+
+    const lower = entry.name.toLowerCase();
+    if (!lower.match(/\.(mp3|wav|ogg|flac|m4a)$/)) continue;
+
+    const parts = entry.name.split("/");
+    const albumName = parts.length > 1 ? parts[parts.length - 2] : "Unknown Album";
+    const trackName = parts[parts.length - 1];
+
+    if (!albumMap[albumName]) albumMap[albumName] = [];
+
+    const blob = await entry.async("blob");
+
+    albumMap[albumName].push({
+      title: trackName,
+      blob
+    });
+  }
+
+  const albumsToSave = Object.keys(albumMap).map(name => ({
+    id: "vault-" + name.replace(/\s+/g, "-").toLowerCase(),
+    title: name,
+    artist: "Unknown Artist",
+    cover: "",
+    tracks: albumMap[name].map(t => ({
+      title: t.title,
+      blob: t.blob
+    }))
+  }));
+
+  for (const album of albumsToSave) {
+    await saveAlbum(album);
+  }
+
+  alert("MusicVault imported and saved forever.");
+  await loadVault();
+}
+
+/* ---------- Load Vault on Startup ---------- */
+async function loadVault() {
+  await openDB();
+  const saved = await loadAllAlbums();
+
+  if (!saved || saved.length === 0) {
+    albums = [];
+    renderAlbums();
+    trackList.innerHTML = "";
+    currentAlbumTitle.textContent = "Drop a ZIP to begin";
+    currentAlbumArtist.textContent = "";
+    return;
+  }
+
+  albums = saved.map(a => ({
+    id: a.id,
+    title: a.title,
+    artist: a.artist,
+    cover: a.cover,
+    tracks: a.tracks.map(t => ({
+      title: t.title,
+      src: URL.createObjectURL(t.blob)
+    }))
+  }));
+
+  renderAlbums();
+  switchAlbum(0);
+}
+
+/* ---------- Drag & Drop Listeners ---------- */
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) handleZipFile(file);
+});
+
+/* ---------- Player Events ---------- */
+playPauseBtn.addEventListener("click", togglePlayPause);
+nextBtn.addEventListener("click", playNext);
+prevBtn.addEventListener("click", playPrev);
+
+audio.addEventListener("timeupdate", () => {
+  if (!isNaN(audio.duration)) {
+    seekSlider.value = (audio.currentTime / audio.duration) * 100;
+    currentTimeEl.textContent = formatTime(audio.currentTime);
+    durationEl.textContent = formatTime(audio.duration);
+  }
+});
+
+audio.addEventListener("ended", playNext);
+
+seekSlider.addEventListener("input", () => {
+  if (!isNaN(audio.duration)) {
+    audio.currentTime = (seekSlider.value / 100) * audio.duration;
+  }
+});
+
+/* ---------- Boot ---------- */
+loadVault();
+
+/* ---------- PWA Service Worker ---------- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+</script>
