@@ -1,368 +1,886 @@
-<!-- JSZip for ZIP extraction -->
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Musicly</title>
 
-<script>
-/* ============================================================
-   PERMANENT MUSIC VAULT — DRAG & DROP ZIP → SAVED FOREVER
-   ============================================================ */
+  <!-- iPhone / PWA essentials -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#050816" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
 
-let albums = []; // starts empty — no demo content
+  <link rel="manifest" href="manifest.webmanifest" />
 
-/* ---------- IndexedDB Setup ---------- */
-const DB_NAME = "MusicVaultDB";
-const DB_VERSION = 1;
-let db = null;
+  <style>
+    :root {
+      --bg: #050816;
+      --bg-elevated: #0b1020;
+      --accent: #ff4b9a;
+      --accent-soft: rgba(255, 75, 154, 0.2);
+      --text: #f5f5ff;
+      --muted: #8a8fb3;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --radius-sm: 8px;
+    }
 
-function openDB() {
-  return new Promise((resolve, reject) => {
-    if (db) return resolve();
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
 
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    html, body {
+      height: 100%;
+    }
 
-    req.onupgradeneeded = e => {
-      db = e.target.result;
-      if (!db.objectStoreNames.contains("albums")) {
-        db.createObjectStore("albums", { keyPath: "id" });
+    body {
+      background: radial-gradient(circle at top, #1a1f3b 0, #050816 55%, #02030a 100%);
+      color: var(--text);
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      padding: 12px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 960px;
+      background: linear-gradient(145deg, rgba(10, 12, 30, 0.96), rgba(5, 8, 22, 0.98));
+      border-radius: 24px;
+      box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.7),
+        0 0 0 1px rgba(255, 255, 255, 0.03);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      backdrop-filter: blur(18px);
+    }
+
+    .app-header {
+      padding: 16px 20px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .app-title {
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .badge-offline {
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.7rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+    }
+
+    .app-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+      gap: 0;
+      min-height: 420px;
+    }
+
+    @media (max-width: 780px) {
+      .app-main {
+        grid-template-columns: 1fr;
       }
-    };
+    }
 
-    req.onsuccess = e => {
-      db = e.target.result;
-      resolve();
-    };
+    .albums-panel {
+      border-right: 1px solid rgba(255, 255, 255, 0.04);
+      padding: 14px 10px 90px;
+      overflow-y: auto;
+    }
 
-    req.onerror = e => reject(e);
-  });
-}
+    @media (max-width: 780px) {
+      .albums-panel {
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        padding-bottom: 12px;
+      }
+    }
 
-function saveAlbum(album) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("albums", "readwrite");
-    tx.objectStore("albums").put(album);
-    tx.oncomplete = resolve;
-    tx.onerror = reject;
-  });
-}
+    .albums-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 12px;
+    }
 
-function loadAllAlbums() {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("albums", "readonly");
-    const req = tx.objectStore("albums").getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = reject;
-  });
-}
+    .album-card {
+      background: radial-gradient(circle at top left, rgba(255, 75, 154, 0.12), rgba(10, 12, 30, 0.96));
+      border-radius: var(--radius-lg);
+      padding: 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: transform 0.12s ease-out, box-shadow 0.12s ease-out, border 0.12s ease-out;
+      border: 1px solid transparent;
+      position: relative;
+      overflow: hidden;
+    }
 
-/* ---------- UI Element References ---------- */
-const albumsGrid = document.getElementById("albumsGrid");
-const trackList = document.getElementById("trackList");
-const currentAlbumThumb = document.getElementById("currentAlbumThumb");
-const currentAlbumTitle = document.getElementById("currentAlbumTitle");
-const currentAlbumArtist = document.getElementById("currentAlbumArtist");
+    .album-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 55%);
+      opacity: 0;
+      transition: opacity 0.15s ease-out;
+      pointer-events: none;
+    }
 
-const miniCover = document.getElementById("miniCover");
-const miniTitle = document.getElementById("miniTitle");
-const miniArtist = document.getElementById("miniArtist");
-const currentTimeEl = document.getElementById("currentTime");
-const durationEl = document.getElementById("duration");
-const seekSlider = document.getElementById("seekSlider");
+    .album-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.6);
+    }
 
-const audio = document.getElementById("audio");
-const playPauseBtn = document.getElementById("playPauseBtn");
-const prevBtn = document.getElementById("prevBtn");
-const nextBtn = document.getElementById("nextBtn");
+    .album-card:hover::before {
+      opacity: 1;
+    }
 
-let currentAlbumIndex = 0;
-let currentTrackIndex = 0;
-let isPlaying = false;
+    .album-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(255, 75, 154, 0.4), 0 18px 40px rgba(0, 0, 0, 0.8);
+    }
 
-/* ---------- Utility ---------- */
-function formatTime(seconds) {
-  if (isNaN(seconds)) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return m + ":" + (s < 10 ? "0" + s : s);
-}
+    .album-cover {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 14px;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+    }
 
-/* ---------- Rendering ---------- */
-function renderAlbums() {
-  albumsGrid.innerHTML = "";
+    .album-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
 
-  albums.forEach((album, index) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "album-card" + (index === currentAlbumIndex ? " active" : "");
+    .album-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-    const cover = document.createElement("div");
-    cover.className = "album-cover";
-    cover.style.backgroundImage =
-      album.cover
-        ? `url("${album.cover}")`
-        : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+    .album-artist {
+      font-size: 0.75rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-    const meta = document.createElement("div");
-    meta.className = "album-meta";
+    .tracks-panel {
+      padding: 16px 16px 90px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
 
-    const title = document.createElement("div");
-    title.className = "album-title";
-    title.textContent = album.title;
+    .current-album-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
 
-    const artist = document.createElement("div");
-    artist.className = "album-artist";
-    artist.textContent = album.artist;
+    .current-album-thumb {
+      width: 52px;
+      height: 52px;
+      border-radius: 16px;
+      background-size: cover;
+      background-position: center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+      flex-shrink: 0;
+    }
 
-    meta.appendChild(title);
-    meta.appendChild(artist);
-    card.appendChild(cover);
-    card.appendChild(meta);
+    .current-album-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
 
-    card.addEventListener("click", () => switchAlbum(index));
+    .current-album-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
 
-    albumsGrid.appendChild(card);
-  });
-}
+    .current-album-artist {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
 
-function renderTracks() {
-  const album = albums[currentAlbumIndex];
-  trackList.innerHTML = "";
+    .track-list {
+      margin-top: 6px;
+      border-radius: var(--radius-md);
+      background: radial-gradient(circle at top left, rgba(255, 75, 154, 0.08), rgba(5, 8, 22, 0.98));
+      padding: 6px;
+      overflow-y: auto;
+      flex: 1;
+    }
 
-  album.tracks.forEach((track, index) => {
-    const row = document.createElement("div");
-    row.className = "track-row" + (index === currentTrackIndex ? " active" : "");
+    .track-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.12s ease-out, transform 0.08s ease-out;
+    }
 
-    const idx = document.createElement("div");
-    idx.className = "track-index";
-    idx.textContent = index + 1;
+    .track-row:hover {
+      background: rgba(255, 255, 255, 0.03);
+      transform: translateY(-1px);
+    }
 
-    const main = document.createElement("div");
-    main.className = "track-main";
+    .track-row.active {
+      background: rgba(255, 75, 154, 0.16);
+    }
 
-    const title = document.createElement("div");
-    title.className = "track-title";
-    title.textContent = track.title;
+    .track-index {
+      font-size: 0.75rem;
+      color: var(--muted);
+      width: 18px;
+      text-align: right;
+    }
 
-    const sub = document.createElement("div");
-    sub.className = "track-sub";
-    sub.textContent = album.artist;
+    .track-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
 
-    main.appendChild(title);
-    main.appendChild(sub);
+    .track-title {
+      font-size: 0.85rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-    const dur = document.createElement("div");
-    dur.className = "track-duration";
-    dur.textContent = track.duration || "";
+    .track-sub {
+      font-size: 0.75rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-    row.appendChild(idx);
-    row.appendChild(main);
-    row.appendChild(dur);
+    .track-duration {
+      font-size: 0.75rem;
+      color: var(--muted);
+      padding-left: 6px;
+    }
 
-    row.addEventListener("click", () => switchTrack(index, true));
+    .mini-player {
+      position: relative;
+      margin-top: auto;
+      padding: 10px 14px 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      background: linear-gradient(90deg, rgba(5, 8, 22, 0.98), rgba(10, 12, 30, 0.98));
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+    }
 
-    trackList.appendChild(row);
-  });
-}
+    .mini-cover {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      background-size: cover;
+      background-position: center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+      flex-shrink: 0;
+    }
 
-/* ---------- Album / Track Switching ---------- */
-function updateAlbumHeader() {
-  const album = albums[currentAlbumIndex];
-  currentAlbumThumb.style.backgroundImage =
-    album.cover
-      ? `url("${album.cover}")`
-      : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+    .mini-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
 
-  currentAlbumTitle.textContent = album.title;
-  currentAlbumArtist.textContent = album.artist;
-}
+    .mini-title {
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-function updateMiniPlayer() {
-  const album = albums[currentAlbumIndex];
-  const track = album.tracks[currentTrackIndex];
+    .mini-artist {
+      font-size: 0.7rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-  miniCover.style.backgroundImage =
-    album.cover
-      ? `url("${album.cover}")`
-      : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+    .mini-controls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      min-width: 120px;
+    }
 
-  miniTitle.textContent = track.title;
-  miniArtist.textContent = album.artist;
-}
+    .mini-buttons {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
 
-function switchAlbum(index) {
-  currentAlbumIndex = index;
-  currentTrackIndex = 0;
-  renderAlbums();
-  updateAlbumHeader();
-  renderTracks();
-  switchTrack(0, false);
-}
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      border: none;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: background 0.12s ease-out, transform 0.08s ease-out;
+    }
 
-function switchTrack(index, autoPlay) {
-  currentTrackIndex = index;
-  const album = albums[currentAlbumIndex];
-  const track = album.tracks[currentTrackIndex];
+    .icon-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      transform: translateY(-1px);
+    }
 
-  audio.src = track.src;
-  audio.currentTime = 0;
-  seekSlider.value = 0;
+    .icon-btn.primary {
+      background: var(--accent);
+      color: #050816;
+      box-shadow: 0 0 18px rgba(255, 75, 154, 0.6);
+    }
 
-  updateMiniPlayer();
-  renderTracks();
+    .icon-btn.primary:hover {
+      background: #ff6fb0;
+    }
 
-  if (autoPlay) play();
-}
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
 
-/* ---------- Player Controls ---------- */
-function play() {
-  audio.play().then(() => {
-    isPlaying = true;
-    playPauseBtn.textContent = "⏸";
-  });
-}
+    .time-label {
+      font-size: 0.65rem;
+      color: var(--muted);
+      width: 32px;
+      text-align: center;
+    }
 
-function pause() {
-  audio.pause();
-  isPlaying = false;
-  playPauseBtn.textContent = "▶";
-}
+    .seek {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      outline: none;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
 
-function togglePlayPause() {
-  if (!audio.src && albums.length > 0) {
-    switchAlbum(0);
-    switchTrack(0, true);
-    return;
-  }
-  isPlaying ? pause() : play();
-}
+    .seek::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow:
+        -200px 0 0 200px var(--accent-soft),
+        0 0 12px rgba(255, 75, 154, 0.8);
+      border: 2px solid #050816;
+    }
 
-function playNext() {
-  const album = albums[currentAlbumIndex];
-  if (currentTrackIndex < album.tracks.length - 1) {
-    switchTrack(currentTrackIndex + 1, true);
-  }
-}
+    .seek::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: var(--accent);
+      border: 2px solid #050816;
+      box-shadow:
+        -200px 0 0 200px var(--accent-soft),
+        0 0 12px rgba(255, 75, 154, 0.8);
+    }
 
-function playPrev() {
-  if (audio.currentTime > 3) {
-    audio.currentTime = 0;
-    return;
-  }
-  if (currentTrackIndex > 0) {
-    switchTrack(currentTrackIndex - 1, true);
-  }
-}
+    .seek::-moz-range-track {
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div class="app-title">Musicly Vault</div>
+      <div class="badge-offline">
+        <span class="badge-dot"></span>
+        Offline-ready
+      </div>
+    </header>
 
-/* ---------- ZIP Import → Permanent Save ---------- */
-async function handleZipFile(file) {
-  await openDB();
+    <main class="app-main">
+      <section class="albums-panel">
+        <div class="albums-grid" id="albumsGrid"></div>
+      </section>
 
-  const zip = await JSZip.loadAsync(file);
-  const albumMap = {};
+      <section class="tracks-panel">
+        <div class="current-album-header">
+          <div class="current-album-thumb" id="currentAlbumThumb"></div>
+          <div class="current-album-text">
+            <div class="current-album-title" id="currentAlbumTitle">Drop a ZIP to begin</div>
+            <div class="current-album-artist" id="currentAlbumArtist"></div>
+          </div>
+        </div>
+        <div class="track-list" id="trackList"></div>
+      </section>
+    </main>
 
-  for (const path in zip.files) {
-    const entry = zip.files[path];
-    if (entry.dir) continue;
+    <footer class="mini-player">
+      <div class="mini-cover" id="miniCover"></div>
+      <div class="mini-meta">
+        <div class="mini-title" id="miniTitle">No track selected</div>
+        <div class="mini-artist" id="miniArtist"></div>
+        <div class="slider-row">
+          <span class="time-label" id="currentTime">0:00</span>
+          <input type="range" min="0" max="100" value="0" class="seek" id="seekSlider" />
+          <span class="time-label" id="duration">0:00</span>
+        </div>
+      </div>
+      <div class="mini-controls">
+        <div class="mini-buttons">
+          <button class="icon-btn" id="prevBtn">⏮</button>
+          <button class="icon-btn primary" id="playPauseBtn">▶</button>
+          <button class="icon-btn" id="nextBtn">⏭</button>
+        </div>
+      </div>
+    </footer>
+  </div>
 
-    const lower = entry.name.toLowerCase();
-    if (!lower.match(/\.(mp3|wav|ogg|flac|m4a)$/)) continue;
+  <audio id="audio" preload="metadata"></audio>
 
-    const parts = entry.name.split("/");
-    const albumName = parts.length > 1 ? parts[parts.length - 2] : "Unknown Album";
-    const trackName = parts[parts.length - 1];
+  <!-- JSZip -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
-    if (!albumMap[albumName]) albumMap[albumName] = [];
+  <script>
+    let albums = [];
 
-    const blob = await entry.async("blob");
+    const DB_NAME = "MusiclyVaultDB";
+    const DB_VERSION = 1;
+    let db = null;
 
-    albumMap[albumName].push({
-      title: trackName,
-      blob
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        if (db) return resolve();
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+        req.onupgradeneeded = e => {
+          db = e.target.result;
+          if (!db.objectStoreNames.contains("albums")) {
+            db.createObjectStore("albums", { keyPath: "id" });
+          }
+        };
+
+        req.onsuccess = e => {
+          db = e.target.result;
+          resolve();
+        };
+
+        req.onerror = e => reject(e);
+      });
+    }
+
+    function saveAlbum(album) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("albums", "readwrite");
+        tx.objectStore("albums").put(album);
+        tx.oncomplete = resolve;
+        tx.onerror = reject;
+      });
+    }
+
+    function loadAllAlbums() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("albums", "readonly");
+        const req = tx.objectStore("albums").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = reject;
+      });
+    }
+
+    const albumsGrid = document.getElementById("albumsGrid");
+    const trackList = document.getElementById("trackList");
+    const currentAlbumThumb = document.getElementById("currentAlbumThumb");
+    const currentAlbumTitle = document.getElementById("currentAlbumTitle");
+    const currentAlbumArtist = document.getElementById("currentAlbumArtist");
+
+    const miniCover = document.getElementById("miniCover");
+    const miniTitle = document.getElementById("miniTitle");
+    const miniArtist = document.getElementById("miniArtist");
+    const currentTimeEl = document.getElementById("currentTime");
+    const durationEl = document.getElementById("duration");
+    const seekSlider = document.getElementById("seekSlider");
+
+    const audio = document.getElementById("audio");
+    const playPauseBtn = document.getElementById("playPauseBtn");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+
+    let currentAlbumIndex = 0;
+    let currentTrackIndex = 0;
+    let isPlaying = false;
+
+    function formatTime(seconds) {
+      if (isNaN(seconds)) return "0:00";
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return m + ":" + (s < 10 ? "0" + s : s);
+    }
+
+    function renderAlbums() {
+      albumsGrid.innerHTML = "";
+      albums.forEach((album, index) => {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "album-card" + (index === currentAlbumIndex ? " active" : "");
+
+        const cover = document.createElement("div");
+        cover.className = "album-cover";
+        cover.style.backgroundImage =
+          album.cover
+            ? `url("${album.cover}")`
+            : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+
+        const meta = document.createElement("div");
+        meta.className = "album-meta";
+
+        const title = document.createElement("div");
+        title.className = "album-title";
+        title.textContent = album.title;
+
+        const artist = document.createElement("div");
+        artist.className = "album-artist";
+        artist.textContent = album.artist;
+
+        meta.appendChild(title);
+        meta.appendChild(artist);
+        card.appendChild(cover);
+        card.appendChild(meta);
+
+        card.addEventListener("click", () => switchAlbum(index));
+
+        albumsGrid.appendChild(card);
+      });
+    }
+
+    function renderTracks() {
+      const album = albums[currentAlbumIndex];
+      trackList.innerHTML = "";
+
+      album.tracks.forEach((track, index) => {
+        const row = document.createElement("div");
+        row.className = "track-row" + (index === currentTrackIndex ? " active" : "");
+
+        const idx = document.createElement("div");
+        idx.className = "track-index";
+        idx.textContent = index + 1;
+
+        const main = document.createElement("div");
+        main.className = "track-main";
+
+        const title = document.createElement("div");
+        title.className = "track-title";
+        title.textContent = track.title;
+
+        const sub = document.createElement("div");
+        sub.className = "track-sub";
+        sub.textContent = album.artist;
+
+        main.appendChild(title);
+        main.appendChild(sub);
+
+        const dur = document.createElement("div");
+        dur.className = "track-duration";
+        dur.textContent = track.duration || "";
+
+        row.appendChild(idx);
+        row.appendChild(main);
+        row.appendChild(dur);
+
+        row.addEventListener("click", () => switchTrack(index, true));
+
+        trackList.appendChild(row);
+      });
+    }
+
+    function updateAlbumHeader() {
+      if (!albums.length) {
+        currentAlbumTitle.textContent = "Drop a ZIP to begin";
+        currentAlbumArtist.textContent = "";
+        currentAlbumThumb.style.backgroundImage = "";
+        return;
+      }
+
+      const album = albums[currentAlbumIndex];
+      currentAlbumThumb.style.backgroundImage =
+        album.cover
+          ? `url("${album.cover}")`
+          : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+
+      currentAlbumTitle.textContent = album.title;
+      currentAlbumArtist.textContent = album.artist;
+    }
+
+    function updateMiniPlayer() {
+      if (!albums.length) {
+        miniCover.style.backgroundImage = "";
+        miniTitle.textContent = "No track selected";
+        miniArtist.textContent = "";
+        return;
+      }
+
+      const album = albums[currentAlbumIndex];
+      const track = album.tracks[currentTrackIndex];
+
+      miniCover.style.backgroundImage =
+        album.cover
+          ? `url("${album.cover}")`
+          : "linear-gradient(135deg, rgba(255,75,154,0.4), rgba(10,12,30,0.9))";
+
+      miniTitle.textContent = track.title;
+      miniArtist.textContent = album.artist;
+    }
+
+    function switchAlbum(index) {
+      currentAlbumIndex = index;
+      currentTrackIndex = 0;
+      renderAlbums();
+      updateAlbumHeader();
+      renderTracks();
+      switchTrack(0, false);
+    }
+
+    function switchTrack(index, autoPlay) {
+      currentTrackIndex = index;
+      const album = albums[currentAlbumIndex];
+      const track = album.tracks[currentTrackIndex];
+
+      audio.src = track.src;
+      audio.currentTime = 0;
+      seekSlider.value = 0;
+      currentTimeEl.textContent = "0:00";
+      durationEl.textContent = "0:00";
+
+      updateMiniPlayer();
+      renderTracks();
+
+      if (autoPlay) play();
+    }
+
+    function play() {
+      audio.play().then(() => {
+        isPlaying = true;
+        playPauseBtn.textContent = "⏸";
+      }).catch(() => {});
+    }
+
+    function pause() {
+      audio.pause();
+      isPlaying = false;
+      playPauseBtn.textContent = "▶";
+    }
+
+    function togglePlayPause() {
+      if (!audio.src && albums.length > 0) {
+        switchAlbum(0);
+        switchTrack(0, true);
+        return;
+      }
+      isPlaying ? pause() : play();
+    }
+
+    function playNext() {
+      if (!albums.length) return;
+      const album = albums[currentAlbumIndex];
+      if (currentTrackIndex < album.tracks.length - 1) {
+        switchTrack(currentTrackIndex + 1, true);
+      }
+    }
+
+    function playPrev() {
+      if (!albums.length) return;
+      if (audio.currentTime > 3) {
+        audio.currentTime = 0;
+        return;
+      }
+      if (currentTrackIndex > 0) {
+        switchTrack(currentTrackIndex - 1, true);
+      }
+    }
+
+    async function handleZipFile(file) {
+      if (!file || !file.name.toLowerCase().endsWith(".zip")) {
+        alert("Drop a .zip file containing your music.");
+        return;
+      }
+
+      await openDB();
+
+      const zip = await JSZip.loadAsync(file);
+      const albumMap = {};
+
+      for (const path in zip.files) {
+        const entry = zip.files[path];
+        if (entry.dir) continue;
+
+        const lower = entry.name.toLowerCase();
+        if (!lower.match(/\.(mp3|wav|ogg|flac|m4a)$/)) continue;
+
+        const parts = entry.name.split("/");
+        const albumName = parts.length > 1 ? parts[parts.length - 2] : "Unknown Album";
+        const trackName = parts[parts.length - 1];
+
+        if (!albumMap[albumName]) albumMap[albumName] = [];
+
+        const blob = await entry.async("blob");
+
+        albumMap[albumName].push({
+          title: trackName,
+          blob
+        });
+      }
+
+      const albumsToSave = Object.keys(albumMap).map(name => ({
+        id: "vault-" + name.replace(/\s+/g, "-").toLowerCase(),
+        title: name,
+        artist: "Unknown Artist",
+        cover: "",
+        tracks: albumMap[name].map(t => ({
+          title: t.title,
+          blob: t.blob
+        }))
+      }));
+
+      for (const album of albumsToSave) {
+        await saveAlbum(album);
+      }
+
+      alert("Music vault imported and saved.");
+      await loadVault();
+    }
+
+    async function loadVault() {
+      await openDB();
+      const saved = await loadAllAlbums();
+
+      if (!saved || saved.length === 0) {
+        albums = [];
+        renderAlbums();
+        updateAlbumHeader();
+        trackList.innerHTML = "";
+        updateMiniPlayer();
+        return;
+      }
+
+      albums = saved.map(a => ({
+        id: a.id,
+        title: a.title,
+        artist: a.artist,
+        cover: a.cover,
+        tracks: a.tracks.map(t => ({
+          title: t.title,
+          src: URL.createObjectURL(t.blob)
+        }))
+      }));
+
+      currentAlbumIndex = 0;
+      currentTrackIndex = 0;
+      renderAlbums();
+      updateAlbumHeader();
+      renderTracks();
+      updateMiniPlayer();
+    }
+
+    window.addEventListener("dragover", e => e.preventDefault());
+    window.addEventListener("drop", e => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file) handleZipFile(file);
     });
-  }
 
-  const albumsToSave = Object.keys(albumMap).map(name => ({
-    id: "vault-" + name.replace(/\s+/g, "-").toLowerCase(),
-    title: name,
-    artist: "Unknown Artist",
-    cover: "",
-    tracks: albumMap[name].map(t => ({
-      title: t.title,
-      blob: t.blob
-    }))
-  }));
+    playPauseBtn.addEventListener("click", togglePlayPause);
+    nextBtn.addEventListener("click", playNext);
+    prevBtn.addEventListener("click", playPrev);
 
-  for (const album of albumsToSave) {
-    await saveAlbum(album);
-  }
+    audio.addEventListener("timeupdate", () => {
+      if (!isNaN(audio.duration)) {
+        seekSlider.value = (audio.currentTime / audio.duration) * 100;
+        currentTimeEl.textContent = formatTime(audio.currentTime);
+        durationEl.textContent = formatTime(audio.duration);
+      }
+    });
 
-  alert("MusicVault imported and saved forever.");
-  await loadVault();
-}
+    audio.addEventListener("ended", playNext);
 
-/* ---------- Load Vault on Startup ---------- */
-async function loadVault() {
-  await openDB();
-  const saved = await loadAllAlbums();
+    seekSlider.addEventListener("input", () => {
+      if (!isNaN(audio.duration)) {
+        audio.currentTime = (seekSlider.value / 100) * audio.duration;
+      }
+    });
 
-  if (!saved || saved.length === 0) {
-    albums = [];
-    renderAlbums();
-    trackList.innerHTML = "";
-    currentAlbumTitle.textContent = "Drop a ZIP to begin";
-    currentAlbumArtist.textContent = "";
-    return;
-  }
+    // iOS audio unlock
+    document.body.addEventListener("touchstart", () => {
+      audio.play().catch(() => {});
+      audio.pause();
+    }, { once: true });
 
-  albums = saved.map(a => ({
-    id: a.id,
-    title: a.title,
-    artist: a.artist,
-    cover: a.cover,
-    tracks: a.tracks.map(t => ({
-      title: t.title,
-      src: URL.createObjectURL(t.blob)
-    }))
-  }));
+    loadVault();
 
-  renderAlbums();
-  switchAlbum(0);
-}
-
-/* ---------- Drag & Drop Listeners ---------- */
-window.addEventListener("dragover", e => e.preventDefault());
-window.addEventListener("drop", e => {
-  e.preventDefault();
-  const file = e.dataTransfer.files[0];
-  if (file) handleZipFile(file);
-});
-
-/* ---------- Player Events ---------- */
-playPauseBtn.addEventListener("click", togglePlayPause);
-nextBtn.addEventListener("click", playNext);
-prevBtn.addEventListener("click", playPrev);
-
-audio.addEventListener("timeupdate", () => {
-  if (!isNaN(audio.duration)) {
-    seekSlider.value = (audio.currentTime / audio.duration) * 100;
-    currentTimeEl.textContent = formatTime(audio.currentTime);
-    durationEl.textContent = formatTime(audio.duration);
-  }
-});
-
-audio.addEventListener("ended", playNext);
-
-seekSlider.addEventListener("input", () => {
-  if (!isNaN(audio.duration)) {
-    audio.currentTime = (seekSlider.value / 100) * audio.duration;
-  }
-});
-
-/* ---------- Boot ---------- */
-loadVault();
-
-/* ---------- PWA Service Worker ---------- */
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
-  });
-}
-</script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
